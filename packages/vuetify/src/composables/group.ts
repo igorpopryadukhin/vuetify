@@ -1,33 +1,31 @@
-import type { Ref, InjectionKey } from 'vue'
+import type { Ref, InjectionKey, SetupContext } from 'vue'
 import { ref, provide, inject, computed, onBeforeUnmount } from 'vue'
-import { useInternal } from './internal'
 import { uuidv4 } from '../utils/helpers'
 
 export interface GroupItem {
   id: string
   value: Ref<any>
-  disabled: Ref<boolean>
+  disabled: Ref<boolean | undefined>
 }
 
 export interface GroupProvide {
   register: (item: GroupItem) => void
   unregister: (id: string) => void
   toggle: (id: string) => void
-  activeClass: Ref<string | undefined>
   selected: Ref<any[]>
-  isActive: (id: string) => boolean
+  isSelected: (id: string) => boolean
   prev: () => void
   next: () => void
   items: Ref<GroupItem[]>
 }
 
-interface ItemProps {
+interface GroupItemProps {
   value: any
   disabled: boolean
   activeClass: string
 }
 
-export function makeItemProps (defaults: Partial<ItemProps> = {}) {
+export function makeItemProps (defaults: Partial<GroupItemProps> = {}) {
   return {
     value: {
       required: true,
@@ -45,15 +43,15 @@ export function makeItemProps (defaults: Partial<ItemProps> = {}) {
 }
 
 export function useItem (
-  props: { disabled: boolean, active?: boolean, activeClass: string },
-  context: any,
+  props: { value?: any, name?: string, disabled?: boolean, active?: boolean, activeClass: string },
+  context: SetupContext<any>,
   injectKey: InjectionKey<GroupProvide>
 ) {
-  const internal = useInternal(props, context)
+  const internal = useProxiedModel(props, context, 'value')
   const disabled = computed(() => props.disabled)
   const group = inject(injectKey, null)
 
-  const id = uuidv4()
+  const id = props.name || uuidv4()
 
   if (group) {
     group.register({
@@ -67,33 +65,48 @@ export function useItem (
     })
   }
 
-  const active = computed(() => {
+  const isSelected = computed(() => {
     if (!group) return props.active
 
-    return group.isActive(id)
-  })
-
-  const activeClass = computed<string | undefined>(() => {
-    if (!group) return props.activeClass
-
-    return group.activeClass.value
+    return group.isSelected(id)
   })
 
   return {
-    active,
-    activeClass,
+    isSelected,
     toggle: () => group && group.toggle(id),
   }
 }
 
+interface GroupProps {
+  multiple?: boolean
+  mandatory?: boolean
+}
+
+export function makeGroupProps (defaults: Partial<GroupProps>) {
+  return {
+    multiple: {
+      type: Boolean,
+      default: defaults.multiple,
+    },
+    mandatory: {
+      type: Boolean,
+      default: defaults.mandatory,
+    },
+  }
+}
+
 export function useGroup (
-  props: { returnValues?: boolean, multiple?: boolean, mandatory?: boolean, max?: number, activeClass?: string },
-  context: any,
+  props: { returnValues?: boolean, multiple?: boolean, mandatory?: boolean, max?: number },
+  context: SetupContext<any>,
   injectKey: InjectionKey<GroupProvide>
 ) {
   const items = ref([]) as Ref<GroupItem[]>
-  const selected = useInternal<any, string[]>(props, context, {
-    in: (v) => {
+  const selected = useProxiedModel<string[], string>(
+    props,
+    context,
+    'value',
+    [],
+    v => {
       if (v == null) return []
 
       const arr = Array.isArray(v) ? v : [v]
@@ -105,14 +118,13 @@ export function useGroup (
 
       return arr.map(a => items.value[a].id)
     },
-    out: (v) => {
+    v => {
       let arr: any[] = v
       if (props.returnValues) arr = v.map(id => getValueFromId(items.value, id))
       else arr = v.map(id => items.value.findIndex(i => i.id === id))
 
       return props.multiple ? arr : arr.length ? arr[0] : null
-    },
-  })
+    })
 
   function register (item: GroupItem) {
     if (props.returnValues && item.value.value == null) {
@@ -136,12 +148,11 @@ export function useGroup (
 
     const valueIndex = selected.value.indexOf(val)
 
-    // Items is not selected, do nothing
+    // Item is not selected, don't need to do anything
     if (valueIndex < 0) return
 
-    // If not mandatory, use regular update process
+    // If not mandatory, try to toggle value off
     if (!props.mandatory) {
-      // eslint-disable-next-line consistent-return
       return updateValue(val)
     }
 
@@ -154,7 +165,6 @@ export function useGroup (
 
     // If mandatory and we have no selection
     // add the last item as value
-    /* istanbul ignore else */
     if (!selected.value.length) {
       updateMandatory(true)
     }
@@ -162,26 +172,23 @@ export function useGroup (
 
   function updateValue (id: string) {
     if (props.multiple) {
-      const defaultValue = Array.isArray(selected.value)
-        ? selected.value
-        : []
-      const internalValue = defaultValue.slice()
+      const internalValue = selected.slice()
       const index = internalValue.findIndex(v => v === id)
 
+      // We can't remove value if group is
+      // mandatory, value already exists,
+      // and it is the only value
       if (
         props.mandatory &&
-        // Item already exists
         index > -1 &&
-        // value would be reduced below min
         internalValue.length - 1 < 1
       ) return
 
+      // We can't add value if it would
+      // cause max limit to be exceeded
       if (
-        // Max is set
         props.max != null &&
-        // Item doesn't exist
         index < 0 &&
-        // value would be increased above max
         internalValue.length + 1 > props.max
       ) return
 
@@ -207,8 +214,6 @@ export function useGroup (
 
     const item = copy.find(c => !c.disabled.value)
 
-    // If no tabs are available
-    // aborts mandatory value
     if (!item) return
 
     updateValue(item.id)
@@ -227,8 +232,11 @@ export function useGroup (
   }
 
   function getOffsetId (offset: number) {
-    // this obviously won't work with multiple values
-    if (props.multiple || !selected.value.length) return items.value[0].id
+    // getting an offset from selected value obviously won't work with multiple values
+    if (props.multiple) throw new Error('!!!')
+
+    // If there is nothing selected, then next value is first item
+    if (!selected.value.length) return items.value[0].id
 
     const currentId = selected.value[0]
     const currentIndex = items.value.findIndex(i => i.id === currentId)
@@ -242,12 +250,11 @@ export function useGroup (
     unregister,
     selected,
     items,
-    toggle: (id: string) => updateValue(id),
+    toggle: updateValue,
     prev: () => selected.value = [getOffsetId(items.value.length - 1)],
     next: () => selected.value = [getOffsetId(1)],
     step: (steps: number) => selected.value = [getOffsetId(steps)],
-    isActive: (id: string) => selected.value.includes(id),
-    activeClass: computed(() => props.activeClass),
+    isSelected: (id: string) => selected.value.includes(id),
   }
 
   provide(injectKey, state)
