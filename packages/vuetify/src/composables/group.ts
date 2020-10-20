@@ -21,12 +21,37 @@ export interface GroupProvide {
   items: Ref<GroupItem[]>
 }
 
-export const GroupSymbol: InjectionKey<GroupProvide> = Symbol('group')
+interface ItemProps {
+  value: any
+  disabled: boolean
+  activeClass: string
+}
 
-export function useItem (props: { disabled: boolean, activeClass: string }, context: any) {
+export function makeItemProps (defaults: Partial<ItemProps> = {}) {
+  return {
+    value: {
+      required: true,
+      default: defaults.value,
+    },
+    disabled: {
+      type: Boolean,
+      default: defaults.disabled,
+    },
+    activeClass: {
+      type: String,
+      default: defaults.activeClass,
+    },
+  }
+}
+
+export function useItem (
+  props: { disabled: boolean, active?: boolean, activeClass: string },
+  context: any,
+  injectKey: InjectionKey<GroupProvide>
+) {
   const internal = useInternal(props, context)
   const disabled = computed(() => props.disabled)
-  const group = inject(GroupSymbol, null)
+  const group = inject(injectKey, null)
 
   const id = uuidv4()
 
@@ -36,14 +61,14 @@ export function useItem (props: { disabled: boolean, activeClass: string }, cont
       value: internal,
       disabled,
     })
+
+    onBeforeUnmount(() => {
+      group.unregister(id)
+    })
   }
 
-  onBeforeUnmount(() => {
-    if (group) group.unregister(id)
-  })
-
   const active = computed(() => {
-    if (!group) return false
+    if (!group) return props.active
 
     return group.isActive(id)
   })
@@ -64,6 +89,7 @@ export function useItem (props: { disabled: boolean, activeClass: string }, cont
 export function useGroup (
   props: { returnValues?: boolean, multiple?: boolean, mandatory?: boolean, max?: number, activeClass?: string },
   context: any,
+  injectKey: InjectionKey<GroupProvide>
 ) {
   const items = ref([]) as Ref<GroupItem[]>
   const selected = useInternal<any, string[]>(props, context, {
@@ -143,20 +169,20 @@ export function useGroup (
       const index = internalValue.findIndex(v => v === id)
 
       if (
-        props.mandatory
+        props.mandatory &&
         // Item already exists
-        && index > -1
+        index > -1 &&
         // value would be reduced below min
-        && internalValue.length - 1 < 1
+        internalValue.length - 1 < 1
       ) return
 
       if (
         // Max is set
-        props.max != null
+        props.max != null &&
         // Item doesn't exist
-        && index < 0
+        index < 0 &&
         // value would be increased above max
-        && internalValue.length + 1 > props.max
+        internalValue.length + 1 > props.max
       ) return
 
       if (index > -1) internalValue.splice(index, 1)
@@ -224,7 +250,7 @@ export function useGroup (
     activeClass: computed(() => props.activeClass),
   }
 
-  provide(GroupSymbol, state)
+  provide(injectKey, state)
 
   return state
 }
