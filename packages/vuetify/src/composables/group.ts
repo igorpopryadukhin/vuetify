@@ -52,6 +52,30 @@ export function useItem (
   }
 }
 
+const getIds = (items: GroupItem[], selection: any[]) => {
+  const ids = []
+
+  for (const item of items) {
+    if ((item.value != null && selection.includes(item.value)) || selection.includes(item.id)) {
+      ids.push(item.id)
+    }
+  }
+
+  return ids
+}
+
+const getValues = (items: GroupItem[], ids: any[]) => {
+  const values = []
+
+  for (const item of items) {
+    if (ids.includes(item.id)) {
+      values.push(item.value != null ? item.value : item.id)
+    }
+  }
+
+  return values
+}
+
 export function useGroup (
   props: { modelValue?: any, multiple?: boolean, mandatory?: boolean, max?: number, returnValues?: boolean },
   context: SetupContext<any>,
@@ -67,28 +91,15 @@ export function useGroup (
     v => {
       if (v == null) return []
 
-      const arr = wrapInArray(v)
-
-      if (props.returnValues) {
-        return arr.map(a => getIdFromValue(items.value, a)) as string[]
-      }
-
-      return arr /*.map(a => items.value[a]?.id).filter(v => v != null)*/
+      return getIds(items.value, wrapInArray(v))
     },
     v => {
-      console.log('out', v)
-      let arr: any[] = v
-      if (props.returnValues) arr = v.map(id => getValueFromId(items.value, id))
-      else arr = v /*.map(id => items.value.findIndex(i => i.id === id))*/
+      const arr = getValues(items.value, v)
 
-      return props.multiple ? arr : arr.length ? arr[0] : null
+      return props.multiple ? arr : arr[0]
     })
 
   function register (item: GroupItem) {
-    if (props.returnValues && item.value == null) {
-      throw new Error('item must have value prop when using return-values')
-    }
-
     items.value.push(item)
 
     // If no value provided and mandatory,
@@ -175,24 +186,4 @@ export function useGroup (
   provide(injectKey, state)
 
   return state
-}
-
-export function getIdFromValue (items: GroupItem[], val: any) {
-  for (const item of items) {
-    if (item.value === val) {
-      return item.id
-    }
-  }
-
-  return null
-}
-
-export function getValueFromId (items: GroupItem[], id: string) {
-  for (const item of items) {
-    if (item.id === id) {
-      return item.value
-    }
-  }
-
-  return null
 }
