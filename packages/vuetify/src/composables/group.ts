@@ -25,30 +25,30 @@ export function useItem (
   injectKey: InjectionKey<GroupProvide>
 ) {
   console.log('useItem')
-  const group = inject(injectKey, null)
+  const group = inject(injectKey)
   const value = computed(() => props.value)
   const id = uuid()
 
-  if (group) {
-    group.register({
-      id,
-      value,
-    })
-
-    onBeforeUnmount(() => {
-      group.unregister(id)
-    })
+  if (!group) {
+    throw new Error(`Could not find useGroup injection for symbol ${injectKey}`)
   }
 
-  const isSelected = computed(() => {
-    if (!group) return props.active
+  group.register({
+    id,
+    value,
+  })
 
+  onBeforeUnmount(() => {
+    group.unregister(id)
+  })
+
+  const isSelected = computed(() => {
     return group.isSelected(id)
   })
 
   return {
     isSelected,
-    toggle: () => group && group.toggle(id),
+    toggle: () => group.toggle(id),
   }
 }
 
