@@ -1,11 +1,12 @@
 import type { Ref, InjectionKey, SetupContext } from 'vue'
 import { ref, provide, inject, computed, onBeforeUnmount } from 'vue'
-import { uuidv4 } from '../utils/helpers'
+import { wrapInArray } from '../util/helpers'
+import { useProxiedModel } from './proxiedModel'
+import { v4 as uuid } from 'uuid'
 
 export interface GroupItem {
   id: string
   value: Ref<any>
-  disabled: Ref<boolean | undefined>
 }
 
 export interface GroupProvide {
@@ -21,8 +22,6 @@ export interface GroupProvide {
 
 interface GroupItemProps {
   value: any
-  disabled: boolean
-  activeClass: string
 }
 
 export function makeItemProps (defaults: Partial<GroupItemProps> = {}) {
@@ -31,33 +30,22 @@ export function makeItemProps (defaults: Partial<GroupItemProps> = {}) {
       required: true,
       default: defaults.value,
     },
-    disabled: {
-      type: Boolean,
-      default: defaults.disabled,
-    },
-    activeClass: {
-      type: String,
-      default: defaults.activeClass,
-    },
   }
 }
 
 export function useItem (
-  props: { value?: any, name?: string, disabled?: boolean, active?: boolean, activeClass: string },
-  context: SetupContext<any>,
+  props: { value?: any, disabled?: boolean, active?: boolean },
   injectKey: InjectionKey<GroupProvide>
 ) {
-  const internal = useProxiedModel(props, context, 'value')
-  const disabled = computed(() => props.disabled)
+  console.log('useItem')
   const group = inject(injectKey, null)
-
-  const id = props.name || uuidv4()
+  const value = computed(() => props.value)
+  const id = uuid()
 
   if (group) {
     group.register({
       id,
-      value: internal,
-      disabled,
+      value,
     })
 
     onBeforeUnmount(() => {
@@ -96,38 +84,39 @@ export function makeGroupProps (defaults: Partial<GroupProps>) {
 }
 
 export function useGroup (
-  props: { returnValues?: boolean, multiple?: boolean, mandatory?: boolean, max?: number },
+  props: { modelValue?: any, multiple?: boolean, mandatory?: boolean, max?: number, returnValues?: boolean },
   context: SetupContext<any>,
   injectKey: InjectionKey<GroupProvide>
 ) {
+  console.log('useGroup')
   const items = ref([]) as Ref<GroupItem[]>
-  const selected = useProxiedModel<string[], string>(
+  const selected = useProxiedModel(
     props,
     context,
-    'value',
+    'modelValue',
     [],
     v => {
       if (v == null) return []
 
-      const arr = Array.isArray(v) ? v : [v]
+      const arr = wrapInArray(v)
 
       if (props.returnValues) {
-        // TODO: filter does not automagically remove undefined from type
         return arr.map(a => getIdFromValue(items.value, a)) as string[]
       }
 
-      return arr.map(a => items.value[a].id)
+      return arr /*.map(a => items.value[a]?.id).filter(v => v != null)*/
     },
     v => {
+      console.log('out', v)
       let arr: any[] = v
       if (props.returnValues) arr = v.map(id => getValueFromId(items.value, id))
-      else arr = v.map(id => items.value.findIndex(i => i.id === id))
+      else arr = v /*.map(id => items.value.findIndex(i => i.id === id))*/
 
       return props.multiple ? arr : arr.length ? arr[0] : null
     })
 
   function register (item: GroupItem) {
-    if (props.returnValues && item.value.value == null) {
+    if (props.returnValues && item.value == null) {
       throw new Error('item must have value prop when using return-values')
     }
 
@@ -136,43 +125,26 @@ export function useGroup (
     // If no value provided and mandatory,
     // assign first registered item
     if (props.mandatory && !selected.value.length) {
-      updateMandatory()
+      selected.value = [item.id]
     }
   }
 
   function unregister (id: string) {
-    const index = items.value.findIndex(i => i.id === id)
-    const val = getValue(id)
+    console.log('unregistering', id)
 
-    items.value.splice(index, 1)
+    selected.value = selected.value.filter(v => v !== id)
 
-    const valueIndex = selected.value.indexOf(val)
-
-    // Item is not selected, don't need to do anything
-    if (valueIndex < 0) return
-
-    // If not mandatory, try to toggle value off
-    if (!props.mandatory) {
-      return updateValue(val)
+    if (props.mandatory && !selected.value.length) {
+      selected.value = [items.value[items.value.length - 1].id]
     }
 
-    // Remove the value
-    if (props.multiple) {
-      selected.value = selected.value.filter(v => v !== val)
-    } else {
-      selected.value = []
-    }
-
-    // If mandatory and we have no selection
-    // add the last item as value
-    if (!selected.value.length) {
-      updateMandatory(true)
-    }
+    items.value = items.value.filter(item => item.id !== id)
   }
 
   function updateValue (id: string) {
+    console.log('update', id)
     if (props.multiple) {
-      const internalValue = selected.slice()
+      const internalValue = selected.value.slice()
       const index = internalValue.findIndex(v => v === id)
 
       // We can't remove value if group is
@@ -203,32 +175,6 @@ export function useGroup (
 
       selected.value = isSame ? [] : [id]
     }
-  }
-
-  function updateMandatory (last?: boolean) {
-    if (!items.value.length) return
-
-    const copy = items.value.slice()
-
-    if (last) copy.reverse()
-
-    const item = copy.find(c => !c.disabled.value)
-
-    if (!item) return
-
-    updateValue(item.id)
-  }
-
-  function getValue (id: string) {
-    for (let i = 0; i < items.value.length; i++) {
-      const item = items.value[i]
-      if (item.id === id) {
-        const val = item.value.value
-        return props.returnValues ? val : i
-      }
-    }
-
-    return null
   }
 
   function getOffsetId (offset: number) {
@@ -264,7 +210,7 @@ export function useGroup (
 
 export function getIdFromValue (items: GroupItem[], val: any) {
   for (const item of items) {
-    if (item.value.value === val) {
+    if (item.value === val) {
       return item.id
     }
   }
@@ -275,20 +221,9 @@ export function getIdFromValue (items: GroupItem[], val: any) {
 export function getValueFromId (items: GroupItem[], id: string) {
   for (const item of items) {
     if (item.id === id) {
-      return item.value.value
+      return item.value
     }
   }
 
   return null
-}
-
-export function getIndexFromId (items: GroupItem[], id: string) {
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    if (item.id === id) {
-      return i
-    }
-  }
-
-  return -1
 }
