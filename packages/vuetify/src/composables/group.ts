@@ -20,19 +20,6 @@ export interface GroupProvide {
   items: Ref<GroupItem[]>
 }
 
-interface GroupItemProps {
-  value: any
-}
-
-export function makeItemProps (defaults: Partial<GroupItemProps> = {}) {
-  return {
-    value: {
-      required: true,
-      default: defaults.value,
-    },
-  }
-}
-
 export function useItem (
   props: { value?: any, disabled?: boolean, active?: boolean },
   injectKey: InjectionKey<GroupProvide>
@@ -62,24 +49,6 @@ export function useItem (
   return {
     isSelected,
     toggle: () => group && group.toggle(id),
-  }
-}
-
-interface GroupProps {
-  multiple?: boolean
-  mandatory?: boolean
-}
-
-export function makeGroupProps (defaults: Partial<GroupProps>) {
-  return {
-    multiple: {
-      type: Boolean,
-      default: defaults.multiple,
-    },
-    mandatory: {
-      type: Boolean,
-      default: defaults.mandatory,
-    },
   }
 }
 
